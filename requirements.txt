@@ -1,0 +1,6 @@
+timestreams
+slack_sdk
+scikit-learn
+pandas
+openai
+pyarrow
