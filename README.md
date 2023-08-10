@@ -1,4 +1,4 @@
-# BeepGPT
+# BeepGPT - Intelligent notifications powered by Kaskada
 
 
 BeepGPT keeps you in the loop without disturbing your focus. 
