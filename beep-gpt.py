@@ -1,6 +1,6 @@
 import json, math, datetime, openai, os, pyarrow, pandas, asyncio
-from slack_sdk.web.async_client import AsyncWebClient
-from slack_sdk.socket_mode.aiohttp import SocketModeClient
+from slack_sdk.web import WebClient
+from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 import sparrow_py as kt
 from sklearn import preprocessing
@@ -19,35 +19,34 @@ async def main():
     openai.api_key = os.environ.get("OPEN_AI_KEY")
     slack = SocketModeClient(
         app_token=os.environ.get("SLACK_APP_TOKEN"),
-        web_client=AsyncWebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+        web_client=WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
     )
 
     
     # Backfill state with historical data
     messages = kt.sources.PyList(
         rows = pyarrow.parquet.read_table("./messages.parquet").to_pylist(),
-        schema = pyarrow.parquet.read_schema("./messages.parquet"),
-        time_column_name = "ts", 
+        time_column_name = "ts_parsed", 
         key_column_name = "channel",
     )
 
     
     # Receive Slack messages in real-time
-    async def handle_message(client, req):
+    def handle_message(client, req):
         # Acknowledge the message back to Slack
-        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+        client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         if req.type == "events_api" and "event" in req.payload:
             # ignore message edit, delete, reaction events
             if "previous_message" in req.payload["event"] or req.payload["event"]["type"] == "reaction_added":
                 return
-
-            req.payload["event"]["ts"] = datetime.datetime.fromtimestamp(float(req.payload["event"]["ts"]))
+            print(f"got message: {req.payload['event']}")
+            req.payload["event"]["ts_parsed"] = datetime.datetime.fromtimestamp(float(req.payload["event"]["ts"]))
             del req.payload["event"]["team"]
             messages.add_rows(req.payload["event"])
 
     slack.socket_mode_request_listeners.append(handle_message)
-    await slack.connect()
+    slack.connect()
     
 
     # Compute conversations from individual messages
@@ -76,18 +75,18 @@ async def main():
             logprobs=5,
             max_tokens=1,
             stop=" end",
-            temperature=1,
+            temperature=0.25,
         )
 
         # Notify interested users
+        print(f"Predicted interest logprobs: {res['choices'][0]['logprobs']['top_logprobs'][0]}")
         for user_id in le.inverse_transform(interested_users(res)):
-            await notify_user(row, msg, user_id, slack)
+            notify_user(row, msg, user_id, slack)
 
 def interested_users(res):
-    users = [2]
+    users = []
     logprobs = res["choices"][0]["logprobs"]["top_logprobs"][0]
     
-    print(f"Predicted interest logprobs: {logprobs}")
     for user in logprobs:
         if math.exp(logprobs[user]) > 0.30:
             user = user.strip()
@@ -97,8 +96,8 @@ def interested_users(res):
             
     return numpy.array(users)
     
-async def notify_user(row, msg, user_id, slack):
-    app = await slack.web_client.users_conversations(
+def notify_user(row, msg, user_id, slack):
+    app = slack.web_client.users_conversations(
         types="im",
         user=user_id,
     )
@@ -106,12 +105,13 @@ async def notify_user(row, msg, user_id, slack):
         print(f'User: {user_id} hasn\'t installed the slackbot yet')
         return
 
-    link = await slack.web_client.chat_getPermalink(
+    print(f"channel {row['_key']['channel']} message {msg['ts']}")
+    link = slack.web_client.chat_getPermalink(
         channel=row["_key"]["channel"],
         message_ts=msg["ts"],
     )
 
-    await slack.web_client.chat_postMessage(
+    slack.web_client.chat_postMessage(
         channel=app["channels"][0]["id"],
         text=f'You may be interested in this converstation: <{link["permalink"]}|{msg["text"]}>'
     )
