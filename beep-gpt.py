@@ -1,36 +1,68 @@
-import json, math, datetime, openai, os, pyarrow, pandas, asyncio
+import json, math, datetime, openai, os, pyarrow, pandas, asyncio, re
 from slack_sdk.web import WebClient
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
-import sparrow_py as kt
+import kaskada as kd
 from sklearn import preprocessing
 import numpy
 
+def strip_links_and_users(line):
+    return re.sub(r"<.*?>", '', line)
+
+def strip_emoji(line):
+    return re.sub(r":.*?:", '', line)
+
+def clean_messages(messages):
+    cleaned = []
+    for msg in messages:
+        text = strip_links_and_users(msg)
+        text = strip_emoji(text)
+        text = text.strip()
+        if text == "" or text.find("```") >= 0:
+            continue
+        cleaned.append(text)
+    return cleaned
+
+prompt_suffix = "\n\n###\n\n"
+max_prompt_len = 5000
+
+# Format prompt for the OpenAI API
+def format_prompt(messages):
+    cleaned = clean_messages(messages)
+    if len(cleaned) == 0:
+        return None
+    cleaned.reverse()
+    prompt = "\n\n".join(cleaned)
+    if len(prompt) > max_prompt_len:
+        prompt = prompt[0:max_prompt_len]
+    return prompt+prompt_suffix
+
 async def main():
     start = datetime.datetime.now()
-    
+
     # Load user label map
     le = preprocessing.LabelEncoder()
-    with open('labels.json') as f:
+    with open('labels_.json') as f:
         le.classes_ = numpy.array(json.load(f))
-    
+
     # Initialize clients
-    kt.init_session()
+    kd.init_session()
     openai.api_key = os.environ.get("OPEN_AI_KEY")
     slack = SocketModeClient(
         app_token=os.environ.get("SLACK_APP_TOKEN"),
         web_client=WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
     )
 
-    
+
     # Backfill state with historical data
-    messages = kt.sources.PyList(
-        rows = pyarrow.parquet.read_table("./messages.parquet").to_pylist(),
-        time_column_name = "ts_parsed", 
+    messages = kd.sources.Parquet(
+        "messages.parquet",
+        time_column_name = "ts",
         key_column_name = "channel",
+        time_unit = "s"
     )
 
-    
+
     # Receive Slack messages in real-time
     def handle_message(client, req):
         # Acknowledge the message back to Slack
@@ -47,15 +79,15 @@ async def main():
 
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
-    
+
 
     # Compute conversations from individual messages
-    conversations = messages.with_key(kt.record({
+    conversations = messages.with_key(kd.record({
             "channel": messages.col("channel"),
             "thread": messages.col("thread_ts"),
         })) \
-        .select("user", "ts", "text", "reactions") \
-        .collect(max=20)
+        .select("user", "ts", "text") \
+        .collect(max=5)
 
 
     # Handle each conversation as it occurs
@@ -64,14 +96,15 @@ async def main():
         conversation = row["result"]
         if row["_time"] < start or len(conversation) == 0:
             continue
-        msg = conversation.pop(-1)
-        
-        
+        msgs = [msg["text"] for msg in conversation]
+
+
         # Ask the model who should be notified
-        print(f'Starting completion on conversation with first message text: {msg["text"]}')
+        print(f'Starting completion on conversation with first message text: {msgs[0]}')
+
         res = openai.Completion.create(
-            model="davinci:ft-personal:coversation-users-full-kaskada-2023-08-05-14-25-30",
-            prompt="start -> " + "\n\n".join([f' {msg["user"]} --> {msg["text"]} ' for msg in conversation]) + "\n\n###\n\n",
+            model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
+            prompt=format_prompt(msgs)
             logprobs=5,
             max_tokens=1,
             stop=" end",
@@ -86,16 +119,16 @@ async def main():
 def interested_users(res):
     users = []
     logprobs = res["choices"][0]["logprobs"]["top_logprobs"][0]
-    
+
     for user in logprobs:
-        if math.exp(logprobs[user]) > 0.30:
+        if math.exp(logprobs[user]) > 0.50:
             user = user.strip()
             if user == "nil":
                 continue
             users.append(user.int())
-            
+
     return numpy.array(users)
-    
+
 def notify_user(row, msg, user_id, slack):
     app = slack.web_client.users_conversations(
         types="im",
