@@ -1,4 +1,5 @@
-import json, math, datetime, openai, os, pyarrow, pandas, asyncio, re
+import json, math, datetime, openai, os, pyarrow, asyncio, re
+from datetime import timezone
 from slack_sdk.web import WebClient
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -38,7 +39,8 @@ def format_prompt(messages):
     return prompt+prompt_suffix
 
 async def main():
-    start = datetime.datetime.now()
+    start = datetime.datetime.now(timezone.utc).utcnow()
+
 
     # Load user label map
     le = preprocessing.LabelEncoder()
@@ -55,8 +57,8 @@ async def main():
 
 
     # Backfill state with historical data
-    messages = kd.sources.Parquet(
-        "messages.parquet",
+    messages = kd.sources.PyList(
+        rows = pyarrow.parquet.read_table("messages.parquet").to_pylist(),
         time_column_name = "ts",
         key_column_name = "channel",
         time_unit = "s"
@@ -72,10 +74,18 @@ async def main():
             # ignore message edit, delete, reaction events
             if "previous_message" in req.payload["event"] or req.payload["event"]["type"] == "reaction_added":
                 return
-            print(f"got message: {req.payload['event']}")
-            req.payload["event"]["ts_parsed"] = datetime.datetime.fromtimestamp(float(req.payload["event"]["ts"]))
-            del req.payload["event"]["team"]
-            messages.add_rows(req.payload["event"])
+            event = req.payload['event']
+
+            # build message obj with desired properties
+            msg = {"thread_ts": None}
+            for key in event.keys():
+                if key in ["user", "text", "channel"]:
+                    msg[key] = event[key]
+                elif key in ["ts", "thread_ts"]:
+                    msg[key] = float(event[key])
+
+            messages.add_rows(msg)
+            print(f"added message: {msg}")
 
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
@@ -87,7 +97,7 @@ async def main():
             "thread": messages.col("thread_ts"),
         })) \
         .select("user", "ts", "text") \
-        .collect(max=5)
+        .collect(max=2)
 
 
     # Handle each conversation as it occurs
@@ -96,25 +106,27 @@ async def main():
         conversation = row["result"]
         if row["_time"] < start or len(conversation) == 0:
             continue
+
         msgs = [msg["text"] for msg in conversation]
-
-
-        # Ask the model who should be notified
-        print(f'Starting completion on conversation with first message text: {msgs[0]}')
+        prompt = format_prompt(msgs)
+        print(f'Starting completion on conversation with prompt: {prompt}')
 
         res = openai.Completion.create(
             model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
-            prompt=format_prompt(msgs)
+            prompt=format_prompt(msgs),
             logprobs=5,
             max_tokens=1,
             stop=" end",
-            temperature=0.25,
+            temperature=0,
         )
+
+        msg = conversation.pop(-1)
+        channel = row["_key"]["channel"]
 
         # Notify interested users
         print(f"Predicted interest logprobs: {res['choices'][0]['logprobs']['top_logprobs'][0]}")
         for user_id in le.inverse_transform(interested_users(res)):
-            notify_user(row, msg, user_id, slack)
+            notify_user(channel, msg, user_id, slack)
 
 def interested_users(res):
     users = []
@@ -125,31 +137,34 @@ def interested_users(res):
             user = user.strip()
             if user == "nil":
                 continue
-            users.append(user.int())
+            users.append(int(user))
 
     return numpy.array(users)
 
-def notify_user(row, msg, user_id, slack):
-    app = slack.web_client.users_conversations(
-        types="im",
-        user=user_id,
-    )
-    if len(app["channels"]) == 0:
-        print(f'User: {user_id} hasn\'t installed the slackbot yet')
-        return
+def notify_user(channel, msg, user_id, slack):
+    print(f'Starting notify_user with channel: {channel}, msg: {msg}, user_id: {user_id}')
+    try:
+        app = slack.web_client.users_conversations(
+            types="im",
+            user=user_id,
+        )
+        if len(app["channels"]) == 0:
+            print(f'User: {user_id} hasn\'t installed the slackbot yet')
+            return
 
-    print(f"channel {row['_key']['channel']} message {msg['ts']}")
-    link = slack.web_client.chat_getPermalink(
-        channel=row["_key"]["channel"],
-        message_ts=msg["ts"],
-    )
+        link = slack.web_client.chat_getPermalink(
+            channel=channel,
+            message_ts=msg["ts"],
+        )
 
-    slack.web_client.chat_postMessage(
-        channel=app["channels"][0]["id"],
-        text=f'You may be interested in this converstation: <{link["permalink"]}|{msg["text"]}>'
-    )
+        slack.web_client.chat_postMessage(
+            channel=app["channels"][0]["id"],
+            text=f'You may be interested in this converstation: <{link["permalink"]}|{msg["text"]}>'
+        )
 
-    print(f'Posted alert message to {user_id}')
+        print(f'Posted alert message to {user_id}')
+    except Exception as e:
+        print(f'Encountered exception in notify_user: {e}')
 
 if __name__ == "__main__":
    asyncio.run(main())
