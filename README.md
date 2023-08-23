@@ -1,6 +1,5 @@
 # BeepGPT - Intelligent notifications powered by Kaskada
 
-
 BeepGPT keeps you in the loop without disturbing your focus.
 Its personalized, intelligent AI continuously monitors your Slack workspace, alerting you to important conversations and freeing you to concentrate on what’s most important.
 
@@ -9,7 +8,7 @@ This training process gives the AI a deep understanding of your interests, exper
 Using this understanding, BeepGPT watches conversations in real-time and notifies you when an important conversation is happening without you.
 With BeepGPT you can focus on getting things done without worrying about missing out.
 
-This repo provides an example implementation of how one might train a model on their Slack data, and run an alerting bot in production.
+This repo provides a notebook for you to train your own model using your Slack data, as well as a script to run the alerting bot in production.
 
 ### Things to do
 * To just experiment with Kaskada, feel free to use the [Example Slack Export](#example-slack-export) included in the repo.
@@ -27,15 +26,16 @@ Note that some PII data has been removed from the export, but it doesn't effect 
 
 #### Model Training Files
 
-* `FineTuning.ipynb` is a Jupyter notebook which contains all the details of how we successfully trained a model to power BeepGPT.
+* `FineTuning_v2.ipynb` is a Jupyter notebook which contains all the details of how we successfully trained a model to power BeepGPT.
 * `human.py` is a python script used in the training process. See section 2.1 in the `FineTuning.ipynb` notebook for more info.
+* `FineTuning_v1.ipynb` is an earlier version of the training procedure. Models trained with this notebook don't generalize as well as those trained with the "v2" notebook.
 
 ##### Training outputs
 
 * `messages.parquet` is a single file that contains the full history of the slack export, but only includes the fields that we use in the model. See section 1.1 in the notebook to see how it is generated.
 * `labels_.json` is a list of userIds that is generated in section 1.3.2 of the notebook. This list is used in the *"Production"* code to convert from an integer token back to a specific user.
 
-#### *"Production"* code
+#### *Production* code
 
 * `beep-gpt.py` contains the code that watches Slack in real-time and alerts you about important conversations. This code uses `messages.parquet` and `labels_.json` as inputs. Note that this code is not production-ready, but functions well enough to demo the full application path.
     1. To run this code, first make sure you using at least Python 3.8. (3.11 recommended):
@@ -64,7 +64,7 @@ After signing up, you will need to add billing details in order to obtain an API
 
 ### Creating a Slack App
 
-If you want to run the *"Production"* code, you will need to create a Slack App and install it into a Slack workspace that you have access to.
+If you want to run the *Production* code, you will need to create a Slack App and install it into a Slack workspace that you have access to.
 
 1. Start here: https://api.slack.com/apps, and click `Create New App`. Choose `From an App Manifest`.
 1. Choose the workspace to install the App in.
