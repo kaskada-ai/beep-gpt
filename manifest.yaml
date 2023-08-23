@@ -1,0 +1,29 @@
+display_information:
+  name: BeepGPT
+  description: A slack bot that notifies you about messages that may be interesting.
+  background_color: "#6d2e8f"
+features:
+  bot_user:
+    display_name: BeepGPT
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - chat:write
+      - groups:read
+      - links:write
+      - mpim:read
+      - reactions:read
+      - im:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - reaction_added
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

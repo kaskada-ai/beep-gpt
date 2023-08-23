@@ -1,6 +1,5 @@
-timestreams
-slack_sdk
-scikit-learn
-pandas
+kaskada==0.6.0a0
 openai
 pyarrow
+scikit-learn
+slack_sdk
