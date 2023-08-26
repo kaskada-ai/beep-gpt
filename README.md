@@ -24,6 +24,15 @@ This repo provides a notebook for you to train your own model using your Slack d
 
 Note that some PII data has been removed from the export, but it doesn't effect the files for our use case.
 
+#### Generated Slack Data
+
+The files inside `slack-generation` include:
+
+* `notebook.ipynb` a Jupyter notebook which describes how to use OpenAI to generate historical slack data.
+* `projects.json` and `schedule.jsonl` are used in the above notebook.
+* `generated.jsonl` is the raw generated historical data.
+* `messages.parquet` and `messages.jsonl` are formatted versions of the the raw data ready to be consumed by Kaskada in the `v2` training notebook below.
+
 #### Model Training Files
 
 * `FineTuning_v2.ipynb` is a Jupyter notebook which contains all the details of how we successfully trained a model to power BeepGPT.
@@ -32,7 +41,6 @@ Note that some PII data has been removed from the export, but it doesn't effect 
 
 ##### Training outputs
 
-* `messages.parquet` is a single file that contains the full history of the slack export, but only includes the fields that we use in the model. See section 1.1 in the notebook to see how it is generated.
 * `labels_.json` is a list of userIds that is generated in section 1.3.2 of the notebook. This list is used in the *"Production"* code to convert from an integer token back to a specific user.
 
 #### *Production* code
