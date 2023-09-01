@@ -3,3 +3,4 @@ openai
 pyarrow
 scikit-learn
 slack_sdk
+backoff

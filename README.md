@@ -44,7 +44,7 @@ Note that some PII data has been removed from the export, but it doesn't effect 
         pip install -r requirements.txt
         ```
     1. Then set the following environment variables:
-        * `OPEN_AI_KEY` -> Found here: https://platform.openai.com/account/api-keys
+        * `OPEN_AI_KEY` -> Found here: https://platform.openai.com/account/api-keys 
         * `SLACK_APP_TOKEN` -> Found here: https://api.slack.com/apps/<your-app-id>/general, should start with `xapp-`
         * `SLACK_BOT_TOKEN` -> Found here: https://api.slack.com/apps/<your-app-id>/oauth, should start with `xoxb-`
     1. Finally start the script

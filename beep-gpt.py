@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import json, math, datetime, openai, os, pyarrow, asyncio, re
 from datetime import timezone
 from slack_sdk.web import WebClient
@@ -41,15 +43,14 @@ def format_prompt(messages):
 async def main():
     start = datetime.datetime.now(timezone.utc).utcnow()
 
-
     # Load user label map
     le = preprocessing.LabelEncoder()
-    with open('labels_.json') as f:
+    with open('labels.json') as f:
         le.classes_ = numpy.array(json.load(f))
 
     # Initialize clients
     kd.init_session()
-    openai.api_key = os.environ.get("OPEN_AI_KEY")
+    openai.api_key = os.environ.get("OPENAI_API_KEY")
     slack = SocketModeClient(
         app_token=os.environ.get("SLACK_APP_TOKEN"),
         web_client=WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -97,7 +98,7 @@ async def main():
             "thread": messages.col("thread_ts"),
         })) \
         .select("user", "ts", "text") \
-        .collect(max=2)
+        .collect(max=20)
 
 
     # Handle each conversation as it occurs
@@ -124,9 +125,11 @@ async def main():
         channel = row["_key"]["channel"]
 
         # Notify interested users
-        print(f"Predicted interest logprobs: {res['choices'][0]['logprobs']['top_logprobs'][0]}")
+        print(f"Predicted interest probs: \n{ {k: math.exp(logprob) for k, logprob in res['choices'][0]['logprobs']['top_logprobs'][0].items()} }")
         for user_id in le.inverse_transform(interested_users(res)):
             notify_user(channel, msg, user_id, slack)
+        if len(interested_users(res)) == 0:
+            print("Not interesting to anyone")
 
 def interested_users(res):
     users = []
