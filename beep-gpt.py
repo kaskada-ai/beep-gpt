@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import json, math, datetime, openai, os, pyarrow, asyncio, re
+import json, math, datetime, openai, os, pyarrow, asyncio, re, time
 from datetime import timezone
 from slack_sdk.web import WebClient
 from slack_sdk.socket_mode import SocketModeClient
@@ -8,6 +8,8 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 import kaskada as kd
 from sklearn import preprocessing
 import numpy
+from aiohttp import web
+import pyarrow as pa
 
 def strip_links_and_users(line):
     return re.sub(r"<.*?>", '', line)
@@ -60,9 +62,21 @@ async def main():
     # Backfill state with historical data
     messages = kd.sources.PyList(
         rows = pyarrow.parquet.read_table("messages.parquet").to_pylist(),
-        time_column_name = "ts",
-        key_column_name = "channel",
+        time_column = "ts",
+        key_column = "channel",
         time_unit = "s"
+    )
+    requests = kd.sources.PyList(
+        rows = [{"ts": time.time(), "channel": "channel", "thread_ts": 0.0, "id": None}],
+        time_column = "ts",
+        key_column = "channel",
+        time_unit = "s",
+        schema = pa.schema([
+            ('ts', pa.float64()),
+            ('channel', pa.string()),
+            ('thread_ts', pa.float64()),
+            ('id', pa.string()),
+        ]),
     )
 
 
@@ -91,45 +105,90 @@ async def main():
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
 
+    # Receive JSON messages in real-time
+    async def handle_http(req: web.Request) -> web.Response:
+        try:
+            data = await req.json()
+        except ValueError:
+            return web.HTTPBadRequest()
+        data["ts"] = time.time()
+        print(f"Got data: {data}")
+
+        try:
+            messages.add_rows(data)
+        except Exception as e:
+            print(f"Failed to add to K*: {e}") 
+        print(f"Added to K*")
+        
+        # TODO: Return result of the flow
+        return web.HTTPOk()
+
+    app = web.Application()
+    app.router.add_post('/', handle_http)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, 'localhost', 8080)
+    await site.start()
+    
 
     # Compute conversations from individual messages
-    conversations = messages.with_key(kd.record({
+    conversations = (
+        messages.with_key(kd.record({
             "channel": messages.col("channel"),
             "thread": messages.col("thread_ts"),
-        })) \
-        .select("user", "ts", "text") \
-        .collect(max=20)
+        })) 
+        .select("user", "ts", "text") 
+        #.collect(max=20)
+    )
+
+    requests = requests.with_key(kd.record({
+        "channel": requests.col("channel"),
+        "thread": requests.col("thread_ts"),    
+    }))
+    outputs = kd.record({
+        "websocket": conversations,
+        "requests": conversations.extend({"request": requests}),
+
+    })
 
 
     # Handle each conversation as it occurs
-    async for row in conversations.run(materialize=True).iter_rows_async():
-        # Skip old messages
-        conversation = row["result"]
-        if row["_time"] < start or len(conversation) == 0:
+    print(f"Waiting for messages from K*")
+    try:
+        async for row in outputs.run(materialize=True).iter_rows_async():
+            print(f"Recieved from K*: {row}")
             continue
+            # Skip old messages
+            conversation = row["result"]
+            if row["_time"] < start or len(conversation) == 0:
+                continue
 
-        msgs = [msg["text"] for msg in conversation]
-        prompt = format_prompt(msgs)
-        print(f'Starting completion on conversation with prompt: {prompt}')
+            msgs = [msg["text"] for msg in conversation]
+            prompt = format_prompt(msgs)
+            print(f'Starting completion on conversation with prompt: {prompt}')
 
-        res = openai.Completion.create(
-            model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
-            prompt=format_prompt(msgs),
-            logprobs=5,
-            max_tokens=1,
-            stop=" end",
-            temperature=0,
-        )
+            res = openai.Completion.create(
+                model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
+                prompt=format_prompt(msgs),
+                logprobs=5,
+                max_tokens=1,
+                stop=" end",
+                temperature=0,
+            )
 
-        msg = conversation.pop(-1)
-        channel = row["_key"]["channel"]
+            msg = conversation.pop(-1)
+            channel = row["_key"]["channel"]
 
-        # Notify interested users
-        print(f"Predicted interest probs: \n{ {k: math.exp(logprob) for k, logprob in res['choices'][0]['logprobs']['top_logprobs'][0].items()} }")
-        for user_id in le.inverse_transform(interested_users(res)):
-            notify_user(channel, msg, user_id, slack)
-        if len(interested_users(res)) == 0:
-            print("Not interesting to anyone")
+            # Notify interested users
+            print(f"Predicted interest probs: \n{ {k: math.exp(logprob) for k, logprob in res['choices'][0]['logprobs']['top_logprobs'][0].items()} }")
+            for user_id in le.inverse_transform(interested_users(res)):
+                notify_user(channel, msg, user_id, slack)
+            if len(interested_users(res)) == 0:
+                print("Not interesting to anyone")
+    except Exception as e:
+        print(f"Failed to receive from K*: {e}") 
+
+    await runner.cleanup()
 
 def interested_users(res):
     users = []
@@ -170,4 +229,6 @@ def notify_user(channel, msg, user_id, slack):
         print(f'Encountered exception in notify_user: {e}')
 
 if __name__ == "__main__":
-   asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.run_forever()
