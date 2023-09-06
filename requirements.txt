@@ -1,5 +1,6 @@
-kaskada==0.6.0a0
+kaskada==0.6.0a1
 openai
 pyarrow
 scikit-learn
 slack_sdk
+transformers
