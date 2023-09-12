@@ -11,12 +11,6 @@ import pandas as pd
 from sklearn import preprocessing
 import numpy
 
-# Format prompt for the OpenAI API
-@kd.udf("f<N: any>(x: N) -> string")
-def format_prompt(batch: pd.Series):
-    # Concatenate messages and add a separator
-    return batch.map(lambda c: "\n\n".join([msg["text"].strip() for msg in reversed(c)])  + " \n\n###\n\n")
-
 async def main():
     start = datetime.datetime.now(timezone.utc).utcnow()
 
@@ -71,56 +65,71 @@ async def main():
                 elif key in ["ts", "thread_ts"]:
                     msg[key] = float(event[key])
 
-            messages.add_rows(msg)
-            print(f"added message: {msg}")
+            messages.add_rows(msg) 
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
 
-    # For our model's predictions to be accurate, we need to prepare real-time prompts the same way we prepared training examples.
-    # Kaskada allows us to use the same operations for historical and real-time data processing.
-    conversations = (
-        messages.with_key(kd.record({
-            "channel": messages.col("channel"),
-            "thread": messages.col("thread_ts"),
-        }))
-        .select("user", "ts", "text")
-        .collect(max=20)
-    )
 
-    # We'll include the structured conversation in the output for building notifications.
-    outputs = kd.record({
-        "prompt": conversations.pipe(format_prompt),
-        "conversation": conversations,
-    })
-
-    # Now we're ready to continually process conversations as they happen.
-    # Kaskada supports "live" execution, where results are incrementally generated as new data arrives.
-    # Here, we'll consume each new result as an async generator.
-    async for row in outputs.run_iter(kind="row", mode="live"):
-        
-        # Send the prompt to the model we fine-tuned
-        # We're abusing OpenAI's API a bit here by asking for a single token but 5 "logprobs"
-        # (this is why we compressed user-id's to single tokens).
-        # The response tells us the 5 most likely next tokens, along with the likelihood of each.
-        # We'll use this liklihood as a notification threshold.
-        print(f'Starting completion on conversation with prompt: {row["prompt"]}')
-        res = openai.Completion.create(
-            model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
-            prompt=row["prompt"],
-            logprobs=5,
-            max_tokens=1,
-            stop=" end",
-            temperature=0,
+    async def handle_conversations():
+        # For our model's predictions to be accurate, we need to prepare real-time prompts 
+        # the same way we prepared training examples.
+    
+        # Kaskada allows us to use the same operations for historical and real-time data processing.
+        conversations = (
+            messages.with_key(kd.record({
+                "channel": messages.col("channel"),
+                "thread": messages.col("thread_ts"),
+            }))
+            .select("user", "ts", "text")
+            .collect(max=20)
         )
-
-        # Notify interested users (users whose reaction likilihood is above a threshold)
-        for user_label in interested_users(res):
-            notify_user(
-                channel = row["_key"]["channel"], 
-                msg = row["conversation"].pop(-1), 
-                user_id = labels[user_label], 
-                slack = slack,
+                
+        # Use the same prompt formatting UDF
+        @kd.udf("f<N: any>(x: N) -> string")
+        def format_prompts(batch: pd.Series):
+            #  Concatenate messages and add a separator
+            def format_prompt(conversation):
+                msgs = [msg["text"].strip() for msg in reversed(conversation)]
+                return "\n\n".join(msgs) + " \n\n###\n\n"
+                
+            # Apply to each row in the batch
+            return batch.map(format_prompt)
+            
+        # We'll include the structured conversation in the output for building notifications.
+        outputs = kd.record({
+            "prompt": conversations.pipe(format_prompts),
+            "conversation": conversations,
+        })
+        
+        # Now we're ready to continually process conversations as they happen.
+        # Kaskada supports "live" execution, where results are incrementally generated as new data arrives.
+        # Here, we'll consume each new result as an async generator.
+        async for row in outputs.run_iter(kind="row", mode="live"):
+            # Send the prompt to the model we fine-tuned
+            # We're abusing OpenAI's API a bit here by asking for a single token but 5 "logprobs"
+            # (this is why we compressed user-id's to single tokens).
+            # The response tells us the 5 most likely next tokens, along with the likelihood of each.
+            # We'll use this liklihood as a notification threshold.
+            print(f'Starting completion on conversation with prompt: {row["prompt"]}')
+            res = openai.Completion.create(
+                model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
+                prompt=row["prompt"],
+                logprobs=5,
+                max_tokens=1,
+                stop=" end",
+                temperature=0,
             )
+    
+            # Notify interested users (users whose reaction likilihood is above a threshold)
+            for user_label in interested_users(res):
+                notify_user(
+                    channel = row["_key"]["channel"], 
+                    msg = row["conversation"].pop(-1), 
+                    user_id = labels[user_label], 
+                    slack = slack,
+                )
+                
+    await handle_conversations()
 
 def interested_users(res):
     users = []
@@ -160,7 +169,7 @@ def notify_user(channel, msg, user_id, slack):
 
         print(f'Posted alert message to {user_id}')
     except Exception as e:
-        print(f'Encountered exception in notify_user: {e}')
+        print(f'Encountered exception in notify_user {user_id}: {e}')
 
 if __name__ == "__main__":
    asyncio.run(main())
