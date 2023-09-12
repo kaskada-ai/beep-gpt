@@ -1,51 +1,29 @@
-import json, math, datetime, openai, os, pyarrow, asyncio, re
+#!/usr/bin/env python
+
+import json, math, datetime, openai, os, pyarrow, asyncio, re, time
 from datetime import timezone
 from slack_sdk.web import WebClient
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 import kaskada as kd
+import pyarrow as pa
+import pandas as pd
 from sklearn import preprocessing
 import numpy
 
-def strip_links_and_users(line):
-    return re.sub(r"<.*?>", '', line)
-
-def strip_emoji(line):
-    return re.sub(r":.*?:", '', line)
-
-def clean_messages(messages):
-    cleaned = []
-    for msg in messages:
-        text = strip_links_and_users(msg)
-        text = strip_emoji(text)
-        text = text.strip()
-        if text == "" or text.find("```") >= 0:
-            continue
-        cleaned.append(text)
-    return cleaned
-
-prompt_suffix = "\n\n###\n\n"
-max_prompt_len = 5000
-
 # Format prompt for the OpenAI API
-def format_prompt(messages):
-    cleaned = clean_messages(messages)
-    if len(cleaned) == 0:
-        return None
-    cleaned.reverse()
-    prompt = "\n\n".join(cleaned)
-    if len(prompt) > max_prompt_len:
-        prompt = prompt[0:max_prompt_len]
-    return prompt+prompt_suffix
+@kd.udf("f<N: any>(x: N) -> string")
+def format_prompt(batch: pd.Series):
+    # Concatenate messages and add a separator
+    return batch.map(lambda c: "\n\n".join([msg["text"].strip() for msg in reversed(c)])  + " \n\n###\n\n")
 
 async def main():
     start = datetime.datetime.now(timezone.utc).utcnow()
 
-
     # Load user label map
-    le = preprocessing.LabelEncoder()
-    with open('labels_.json') as f:
-        le.classes_ = numpy.array(json.load(f))
+    labels = []
+    with open('labels.json') as f:
+        labels = json.load(f)
 
     # Initialize clients
     kd.init_session()
@@ -55,17 +33,26 @@ async def main():
         web_client=WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
     )
 
-
-    # Backfill state with historical data
-    messages = kd.sources.PyList(
-        rows = pyarrow.parquet.read_table("messages.parquet").to_pylist(),
-        time_column_name = "ts",
-        key_column_name = "channel",
+    # As messages are received we want to handle them with Kaskada.
+    # This creates a data source we can add messages to dynamically.
+    # We need to specify a schema, since it can't be inferred from the initial dataset.
+    messages = kd.sources.PyDict(
+        rows = [],
+        schema = pa.schema([
+            pa.field("ts", pa.float64()),
+            pa.field("channel", pa.string()),
+            pa.field("user", pa.string()),
+            pa.field("text", pa.string()),
+            pa.field("thread_ts", pa.string()),
+        ]),
+        time_column = "ts",
+        key_column = "channel",
         time_unit = "s"
     )
 
-
-    # Receive Slack messages in real-time
+    # Slack's "socket mode" API delivers events in real-time.
+    # To use it, we define a handler and register it with Slack's API.
+    # As long as this process is running, it will receive live updates.
     def handle_message(client, req):
         # Acknowledge the message back to Slack
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
@@ -86,53 +73,62 @@ async def main():
 
             messages.add_rows(msg)
             print(f"added message: {msg}")
-
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
 
-
-    # Compute conversations from individual messages
-    conversations = messages.with_key(kd.record({
+    # For our model's predictions to be accurate, we need to prepare real-time prompts the same way we prepared training examples.
+    # Kaskada allows us to use the same operations for historical and real-time data processing.
+    conversations = (
+        messages.with_key(kd.record({
             "channel": messages.col("channel"),
             "thread": messages.col("thread_ts"),
-        })) \
-        .select("user", "ts", "text") \
-        .collect(max=2)
+        }))
+        .select("user", "ts", "text")
+        .collect(max=20)
+    )
 
+    # We'll include the structured conversation in the output for building notifications.
+    outputs = kd.record({
+        "prompt": conversations.pipe(format_prompt),
+        "conversation": conversations,
+    })
 
-    # Handle each conversation as it occurs
-    async for row in conversations.run(materialize=True).iter_rows_async():
-        # Skip old messages
-        conversation = row["result"]
-        if row["_time"] < start or len(conversation) == 0:
-            continue
-
-        msgs = [msg["text"] for msg in conversation]
-        prompt = format_prompt(msgs)
-        print(f'Starting completion on conversation with prompt: {prompt}')
-
+    # Now we're ready to continually process conversations as they happen.
+    # Kaskada supports "live" execution, where results are incrementally generated as new data arrives.
+    # Here, we'll consume each new result as an async generator.
+    async for row in outputs.run_iter(kind="row", mode="live"):
+        
+        # Send the prompt to the model we fine-tuned
+        # We're abusing OpenAI's API a bit here by asking for a single token but 5 "logprobs"
+        # (this is why we compressed user-id's to single tokens).
+        # The response tells us the 5 most likely next tokens, along with the likelihood of each.
+        # We'll use this liklihood as a notification threshold.
+        print(f'Starting completion on conversation with prompt: {row["prompt"]}')
         res = openai.Completion.create(
             model="curie:ft-datastax:coversation-next-message-cur-8-2023-08-15-18-01-18",
-            prompt=format_prompt(msgs),
+            prompt=row["prompt"],
             logprobs=5,
             max_tokens=1,
             stop=" end",
             temperature=0,
         )
 
-        msg = conversation.pop(-1)
-        channel = row["_key"]["channel"]
-
-        # Notify interested users
-        print(f"Predicted interest logprobs: {res['choices'][0]['logprobs']['top_logprobs'][0]}")
-        for user_id in le.inverse_transform(interested_users(res)):
-            notify_user(channel, msg, user_id, slack)
+        # Notify interested users (users whose reaction likilihood is above a threshold)
+        for user_label in interested_users(res):
+            notify_user(
+                channel = row["_key"]["channel"], 
+                msg = row["conversation"].pop(-1), 
+                user_id = labels[user_label], 
+                slack = slack,
+            )
 
 def interested_users(res):
     users = []
     logprobs = res["choices"][0]["logprobs"]["top_logprobs"][0]
 
     for user in logprobs:
+        print(f"Predicted user interest for '{user.strip()}': {100 * math.exp(logprobs[user]):.2f}%")
+        
         if math.exp(logprobs[user]) > 0.50:
             user = user.strip()
             if user == "nil":
