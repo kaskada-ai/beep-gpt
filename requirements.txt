@@ -4,3 +4,4 @@ pyarrow
 scikit-learn
 slack_sdk
 transformers
+wandb
