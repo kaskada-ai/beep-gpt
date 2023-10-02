@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import json, math, datetime, openai, os, pyarrow, asyncio, re, time
+import json, math, datetime, openai, os, asyncio
 from datetime import timezone
 from slack_sdk.web import WebClient
 from slack_sdk.socket_mode import SocketModeClient
@@ -8,7 +8,6 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 import kaskada as kd
 import pyarrow as pa
 import pandas as pd
-from sklearn import preprocessing
 import numpy
 
 async def main():
@@ -16,7 +15,7 @@ async def main():
 
     # Load user label map
     labels = []
-    with open('labels.json') as f:
+    with open('labels_v1.json') as f:
         labels = json.load(f)
 
     # Initialize clients
@@ -65,15 +64,15 @@ async def main():
                 elif key in ["ts", "thread_ts"]:
                     msg[key] = float(event[key])
 
-            messages.add_rows(msg) 
+            messages.add_rows(msg)
     slack.socket_mode_request_listeners.append(handle_message)
     slack.connect()
 
 
     async def handle_conversations():
-        # For our model's predictions to be accurate, we need to prepare real-time prompts 
+        # For our model's predictions to be accurate, we need to prepare real-time prompts
         # the same way we prepared training examples.
-    
+
         # Kaskada allows us to use the same operations for historical and real-time data processing.
         conversations = (
             messages.with_key(kd.record({
@@ -83,7 +82,7 @@ async def main():
             .select("user", "ts", "text")
             .collect(max=20)
         )
-                
+
         # Use the same prompt formatting UDF
         @kd.udf("f<N: any>(x: N) -> string")
         def format_prompts(batch: pd.Series):
@@ -91,16 +90,16 @@ async def main():
             def format_prompt(conversation):
                 msgs = [msg["text"].strip() for msg in reversed(conversation)]
                 return "\n\n".join(msgs) + " \n\n###\n\n"
-                
+
             # Apply to each row in the batch
             return batch.map(format_prompt)
-            
+
         # We'll include the structured conversation in the output for building notifications.
         outputs = kd.record({
             "prompt": conversations.pipe(format_prompts),
             "conversation": conversations,
         })
-        
+
         # Now we're ready to continually process conversations as they happen.
         # Kaskada supports "live" execution, where results are incrementally generated as new data arrives.
         # Here, we'll consume each new result as an async generator.
@@ -119,16 +118,16 @@ async def main():
                 stop=" end",
                 temperature=0,
             )
-    
+
             # Notify interested users (users whose reaction likilihood is above a threshold)
             for user_label in interested_users(res):
                 notify_user(
-                    channel = row["_key"]["channel"], 
-                    msg = row["conversation"].pop(-1), 
-                    user_id = labels[user_label], 
+                    channel = row["_key"]["channel"],
+                    msg = row["conversation"].pop(-1),
+                    user_id = labels[user_label],
                     slack = slack,
                 )
-                
+
     await handle_conversations()
 
 def interested_users(res):
@@ -137,7 +136,7 @@ def interested_users(res):
 
     for user in logprobs:
         print(f"Predicted user interest for '{user.strip()}': {100 * math.exp(logprobs[user]):.2f}%")
-        
+
         if math.exp(logprobs[user]) > 0.50:
             user = user.strip()
             if user == "nil":

@@ -20,28 +20,32 @@ This repo provides a notebook for you to train your own model using your Slack d
 
 #### Example Slack Export
 
-* `slack-export` contains an example Slack workspace export. To learn more about the format of the export, see: https://slack.com/help/articles/220556107-How-to-read-Slack-data-exports
+* `slack-export/` contains an example Slack workspace export. To learn more about the format of the export, see: https://slack.com/help/articles/220556107-How-to-read-Slack-data-exports
 
 Note that some PII data has been removed from the export, but it doesn't effect the files for our use case.
 
+* `slack-export.parquet` contains the data from the example export, in the proper format to be consumed by Kaskada.
+
 #### Generated Slack Data
 
-The files inside `slack-generation` include:
-
-* `notebook.ipynb` a Jupyter notebook which describes how to use OpenAI to generate historical slack data.
-* `projects.json` and `schedule.jsonl` are used in the above notebook.
-* `generated.jsonl` is the raw generated historical data.
-* `messages.parquet` and `messages.jsonl` are formatted versions of the the raw data ready to be consumed by Kaskada in the `v2` training notebook below.
+* The files inside `slack-generation/` include:
+    * `notebook.ipynb` a Jupyter notebook which describes how to use OpenAI to generate historical slack data.
+    * `projects.json` and `schedule.jsonl` are used in the above notebook.
+    * `generated.jsonl` is the raw generated historical data.
+* `slack-generation.parquet` contains all the generated slack data in the proper format to be consumed by Kaskada. It is used as example data in the `v2` training notebook below.
 
 #### Model Training Files
 
 * `FineTuning_v2.ipynb` is a Jupyter notebook which contains all the details of how we successfully trained a model to power BeepGPT.
-* `human.py` is a python script used in the training process. See section 2.1 in the `FineTuning.ipynb` notebook for more info.
+* `human.py` is a python script used in the v2 training process. See section 2.1 in the `FineTuning_v2.ipynb` notebook for more info.
 * `FineTuning_v1.ipynb` is an earlier version of the training procedure. Models trained with this notebook don't generalize as well as those trained with the "v2" notebook.
 
 ##### Training outputs
 
-* `labels_.json` is a list of userIds that is generated in section 1.3.2 of the notebook. This list is used in the *"Production"* code to convert from an integer token back to a specific user.
+* `labels_v2.json`
+* `labels_v1.json`
+
+These are lists of userIds from the training notebooks. These files are used in the production code to convert single-token user representations back to their original userId.
 
 #### *Production* code
 

@@ -1,6 +1,6 @@
 import json
 
-file = "examples"
+file = "examples_v2"
 
 with open(f'{file}.jsonl', 'r') as in_file:
     with open(f'{file}_strong.jsonl', 'w') as strong_file:
