@@ -1,7 +1,16 @@
-kaskada==0.6.0a1
+kaskada==0.6.0a4
 openai
 pyarrow
 scikit-learn
 slack_sdk
 transformers
 wandb
+jupyter
+pandas
+pyarrow
+datasets
+evaluate
+ipywidgets
+torch
+accelerate
+plotly
