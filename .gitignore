@@ -1,2 +1,2 @@
-*.jsonl
 .DS_Store
+.vscode/*
