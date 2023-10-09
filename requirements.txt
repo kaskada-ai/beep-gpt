@@ -1,4 +1,4 @@
-kaskada==0.6.0a0
+kaskada==0.6.0a4
 openai
 pyarrow
 scikit-learn
