@@ -76,7 +76,8 @@ The following files are related to a new approach we are taking on the project:
 Files:
 * `ChatCompletion_v1.ipynb` a Jupyter notebook that uses chat completion to determine if a user should be notified.
   * This notebook was primarily created as a baseline for comparing to results of other methods.
-* `ChatCompletion_v1_results.jsonl` contains the results from the above notebook.
+* `ChatCompletion_v1_results_*.jsonl` contains the results from the above notebook from various runs.
+  * The results are different on each run
 
 ### Getting an OpenAI API key
 
