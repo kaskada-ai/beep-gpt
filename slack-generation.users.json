@@ -1,0 +1,50 @@
+[
+    {
+        "id": "U3E44CFA1",
+        "team_id": "T3CH1E",
+        "name": "usera",
+        "real_name": "UserA",
+        "is_bot": false,
+        "updated": 1690783143
+    },
+    {
+        "id": "U03CC4325",
+        "team_id": "T3CH1E",
+        "name": "usere",
+        "real_name": "UserE",
+        "is_bot": false,
+        "updated": 1690783142
+    },
+    {
+        "id": "UBB9D2B01",
+        "team_id": "T3CH1E",
+        "name": "userb",
+        "real_name": "UserB",
+        "is_bot": false,
+        "updated": 1690783141
+    },
+    {
+        "id": "U605AEB3E",
+        "team_id": "T3CH1E",
+        "name": "userd",
+        "real_name": "UserD",
+        "is_bot": false,
+        "updated": 1690783145
+    },
+    {
+        "id": "UEA27BBFF",
+        "team_id": "T3CH1E",
+        "name": "userf",
+        "real_name": "UserF",
+        "is_bot": false,
+        "updated": 1690783144
+    },
+    {
+        "id": "UFB3DA5BF",
+        "team_id": "T3CH1E",
+        "name": "userc",
+        "real_name": "UserC",
+        "is_bot": false,
+        "updated": 1690783140
+    }
+]

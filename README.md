@@ -33,14 +33,15 @@ Note that some PII data has been removed from the export, but it doesn't effect 
     * `projects.json` and `schedule.jsonl` are used in the above notebook.
     * `generated.jsonl` is the raw generated historical data.
 * `slack-generation.parquet` contains all the generated slack data in the proper format to be consumed by Kaskada. It is used as example data in the `v2` training notebook below.
+* `slack-generation.users.json` contains an example `users.json` file for user lookup in various notebooks.
 
-#### Model Training Files
+#### Fine-Tuning Model Training Files
 
 * `FineTuning_v2.ipynb` is a Jupyter notebook which contains all the details of how we successfully trained a model to power BeepGPT.
 * `human.py` is a python script used in the v2 training process. See section 2.1 in the `FineTuning_v2.ipynb` notebook for more info.
 * `FineTuning_v1.ipynb` is an earlier version of the training procedure. Models trained with this notebook don't generalize as well as those trained with the "v2" notebook.
 
-##### Training outputs
+##### Training Outputs
 
 * `labels_v2.json`
 * `labels_v1.json`
@@ -65,6 +66,17 @@ These are lists of userIds from the training notebooks. These files are used in 
         ```
 
 * `manifest.yaml` contains a template for creating a new App in Slack
+
+#### A New Approach
+
+The following files are related to a new approach we are taking on the project:
+* Let users specify what topics they are interested in following.
+* The system can recommend topics based on previous history.
+
+Files:
+* `ChatCompletion_v1.ipynb` a Jupyter notebook that uses chat completion to determine if a user should be notified.
+  * This notebook was primarily created as a baseline for comparing to results of other methods.
+* `ChatCompletion_v1_results.jsonl` contains the results from the above notebook.
 
 ### Getting an OpenAI API key
 
