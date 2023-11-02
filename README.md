@@ -86,6 +86,23 @@ Files:
 * `Vectors_v1_<model_name>_scores.jsonl` output from running retrieval against the topic embeddings for each conversation.
   * One file for each embedding model.
 
+
+#### Conversation Endings
+
+In most of the examples above, we used "10 minutes with no new messages" as the separator between conversations. But in real
+life this is probably a bad way to determine if a conversation is ended. In the following files we experiment with the idea
+of using few-shot learning and chat completion "in the loop" to determine the end of a conversation.
+
+* `ConversationEnding_v1.ipynb` In this notebook, we use Kaskada to gather up previous messages in a channel and a UDF to call
+  the LLM to make the determination. This method includes the past 5 messages in the channel, independent of whether or not they
+  are part of the current conversation.
+  * `ConversationEnding_v1_results.jsonl` contains the results from this experiment.
+  * `ConversationEnding_v1_input.jsonl` contains a small set of data to test if we can determine the end of a conversation based
+    on the string output from a previous step
+* `ConversationEnding_v2.ipynb` In this notebook, we use [Ray remote Actors](https://docs.ray.io/en/latest/ray-core/actors.html)
+  to enable calling the LLM in a parallel manner. This method only include messages that are part of the current conversation.
+  * For this method we just proved out the technique. No results file is available.
+
 ### Getting an OpenAI API key
 
 In order to experiment with training a model, you will need an OpenAI API key.
