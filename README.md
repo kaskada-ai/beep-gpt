@@ -78,6 +78,13 @@ Files:
   * This notebook was primarily created as a baseline for comparing to results of other methods.
 * `ChatCompletion_v1_results_*.jsonl` contains the results from the above notebook from various runs.
   * The results are different on each run
+* `Vectors_v0.ipynb` a Jupyter notebook that uses embeddings and vector search to determine if a user should be notified.
+  * This notebook creates embeddings for the conversations and tries to match them to topics
+* `Vectors_v1.ipynb` a Jupyter notebook that evaluates numerous embeddings models to try to determine which works best for this scenario.
+  * This notebook create embeddings for the topics and tries to match them to conversations.
+  * Outputs are compared to the results from `ChatCompletion_v1.ipynb` to determine which embedding models work best
+* `Vectors_v1_<model_name>_scores.jsonl` output from running retrieval against the topic embeddings for each conversation.
+  * One file for each embedding model.
 
 ### Getting an OpenAI API key
 
